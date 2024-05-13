@@ -1,0 +1,59 @@
+import java.io.BufferedReader;
+import java.io.FileReader;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+
+public class SoapServiceClient {
+
+    public static void main(String[] args) {
+        try {
+            // Step 1: Read SOAP request template from XML file
+            String soapRequestTemplate = readSoapRequestTemplateFromFile("soap-request.xml");
+
+            // Step 2: Send SOAP request to SOAP web service
+            sendSoapRequest(soapRequestTemplate, "http://example.com/soap/service");
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private static String readSoapRequestTemplateFromFile(String filePath) throws Exception {
+        StringBuilder soapRequest = new StringBuilder();
+        try (BufferedReader reader = new BufferedReader(new FileReader(filePath))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                soapRequest.append(line).append("\n");
+            }
+        }
+        return soapRequest.toString();
+    }
+
+    private static void sendSoapRequest(String soapRequest, String endpointUrl) throws Exception {
+        URL url = new URL(endpointUrl);
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+        connection.setRequestMethod("POST");
+        connection.setRequestProperty("Content-Type", "text/xml; charset=utf-8");
+        connection.setDoOutput(true);
+
+        try (OutputStream outputStream = connection.getOutputStream()) {
+            outputStream.write(soapRequest.getBytes());
+        }
+
+        int responseCode = connection.getResponseCode();
+        System.out.println("Response Code: " + responseCode);
+
+        if (responseCode == HttpURLConnection.HTTP_OK) {
+            try (BufferedReader in = new BufferedReader(new java.io.InputStreamReader(connection.getInputStream()))) {
+                String inputLine;
+                StringBuilder response = new StringBuilder();
+                while ((inputLine = in.readLine()) != null) {
+                    response.append(inputLine);
+                }
+                System.out.println("SOAP Response: " + response.toString());
+            }
+        } else {
+            System.err.println("Failed to send SOAP request. Response Code: " + responseCode);
+        }
+    }
+}
