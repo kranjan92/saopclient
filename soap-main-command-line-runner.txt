@@ -1,0 +1,71 @@
+import org.springframework.boot.CommandLineRunner;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.annotation.Bean;
+import org.springframework.oxm.jaxb.Jaxb2Marshaller;
+import org.springframework.ws.client.core.WebServiceTemplate;
+
+@SpringBootApplication
+public class SoapClientApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(SoapClientApplication.class, args);
+    }
+
+    @Bean
+    public CommandLineRunner soapClientRunner(WebServiceTemplate webServiceTemplate) {
+        return args -> {
+            if (args.length < 1) {
+                System.err.println("Please provide the name of the SOAP service to call.");
+                return;
+            }
+
+            String serviceName = args[0];
+
+            switch (serviceName.toLowerCase()) {
+                case "add":
+                    callSoapService(webServiceTemplate, new AddRequestFactory());
+                    break;
+                case "subtract":
+                    callSoapService(webServiceTemplate, new SubtractRequestFactory());
+                    break;
+                default:
+                    System.err.println("Unknown SOAP service: " + serviceName);
+            }
+        };
+    }
+
+    private void callSoapService(WebServiceTemplate webServiceTemplate, SoapRequestFactory requestFactory) {
+        Object request = requestFactory.createRequest();
+
+        logRequest(request);
+
+        Object response = webServiceTemplate.marshalSendAndReceive(request);
+
+        logResponse(response);
+    }
+
+    private void logRequest(Object request) {
+        System.out.println("SOAP Request: " + request);
+    }
+
+    private void logResponse(Object response) {
+        System.out.println("SOAP Response: " + response);
+    }
+
+    @Bean
+    public Jaxb2Marshaller marshaller() {
+        Jaxb2Marshaller marshaller = new Jaxb2Marshaller();
+        marshaller.setContextPath("com.example.calculator");
+        return marshaller;
+    }
+
+    @Bean
+    public WebServiceTemplate webServiceTemplate(Jaxb2Marshaller marshaller) {
+        WebServiceTemplate template = new WebServiceTemplate();
+        template.setMarshaller(marshaller);
+        template.setUnmarshaller(marshaller);
+        return template;
+    }
+
+}
