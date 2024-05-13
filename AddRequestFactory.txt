@@ -1,0 +1,9 @@
+public class AddRequestFactory implements SoapRequestFactory {
+    @Override
+    public Object createRequest() {
+        Add request = new Add();
+        request.setIntA(10);
+        request.setIntB(20);
+        return request;
+    }
+}

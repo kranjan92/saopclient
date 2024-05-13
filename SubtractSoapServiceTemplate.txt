@@ -1,0 +1,11 @@
+public class SubtractSoapServiceTemplate extends SoapServiceTemplate {
+    @Override
+    protected void logRequest(Object request) {
+        logger.info("Subtract SOAP Request: " + request);
+    }
+
+    @Override
+    protected void logResponse(Object response) {
+        logger.info("Subtract SOAP Response: " + response);
+    }
+}

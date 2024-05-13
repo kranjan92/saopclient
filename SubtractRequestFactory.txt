@@ -1,0 +1,9 @@
+public class SubtractRequestFactory implements SoapRequestFactory {
+    @Override
+    public Object createRequest() {
+        Subtract request = new Subtract();
+        request.setIntA(50);
+        request.setIntB(30);
+        return request;
+    }
+}

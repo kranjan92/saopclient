@@ -1,0 +1,144 @@
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.CommandLineRunner;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.oxm.jaxb.Jaxb2Marshaller;
+import org.springframework.ws.client.core.WebServiceTemplate;
+import org.springframework.ws.transport.http.HttpComponentsMessageSender;
+import org.yaml.snakeyaml.Yaml;
+
+import java.io.InputStream;
+import java.util.Map;
+
+@SpringBootApplication
+public class SoapClientApplication implements CommandLineRunner {
+
+    public static void main(String[] args) {
+        SpringApplication.run(SoapClientApplication.class, args);
+    }
+
+    @Autowired
+    private SoapServiceFactory soapServiceFactory;
+
+    @Override
+    public void run(String... args) throws Exception {
+        if (args.length < 1) {
+            System.err.println("Please provide the name of the SOAP service to call.");
+            return;
+        }
+
+        String serviceName = args[0];
+
+        SoapService soapService = soapServiceFactory.getSoapService(serviceName);
+        if (soapService != null) {
+            soapService.call();
+        } else {
+            System.err.println("Unknown SOAP service: " + serviceName);
+        }
+    }
+
+}
+
+@Configuration
+class AppConfig {
+
+    @Bean
+    public Jaxb2Marshaller marshaller() {
+        Jaxb2Marshaller marshaller = new Jaxb2Marshaller();
+        marshaller.setContextPath("com.example.calculator");
+        return marshaller;
+    }
+
+    @Bean
+    public WebServiceTemplate webServiceTemplate(Jaxb2Marshaller marshaller) {
+        WebServiceTemplate template = new WebServiceTemplate();
+        template.setMarshaller(marshaller);
+        template.setUnmarshaller(marshaller);
+        template.setMessageSender(httpComponentsMessageSender());
+        return template;
+    }
+
+    @Bean
+    public HttpComponentsMessageSender httpComponentsMessageSender() {
+        return new HttpComponentsMessageSender();
+    }
+
+    @Bean
+    @Primary
+    public SoapServiceFactory soapServiceFactory() {
+        return new SoapServiceFactory();
+    }
+
+    @Bean
+    public Yaml yaml() {
+        return new Yaml();
+    }
+
+    @Bean
+    public Map<String, String> soapServiceUrls(Yaml yaml) {
+        try (InputStream inputStream = new ClassPathResource("application.yml").getInputStream()) {
+            Map<String, Map<String, String>> yamlObject = yaml.load(inputStream);
+            return yamlObject.get("soap").get("services");
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
+
+}
+
+class SoapServiceFactory {
+
+    @Autowired
+    private Map<String, String> soapServiceUrls;
+
+    @Autowired
+    private WebServiceTemplate webServiceTemplate;
+
+    public SoapService getSoapService(String serviceName) {
+        String wsdlUrl = soapServiceUrls.get(serviceName);
+        if (wsdlUrl != null) {
+            return new SoapService(webServiceTemplate, wsdlUrl, serviceName);
+        }
+        return null;
+    }
+}
+
+class SoapService {
+
+    private WebServiceTemplate webServiceTemplate;
+    private String wsdlUrl;
+    private String serviceName;
+
+    public SoapService(WebServiceTemplate webServiceTemplate, String wsdlUrl, String serviceName) {
+        this.webServiceTemplate = webServiceTemplate;
+        this.wsdlUrl = wsdlUrl;
+        this.serviceName = serviceName;
+    }
+
+    public void call() {
+        SoapRequestFactory requestFactory = null;
+        SoapServiceTemplate template = null;
+
+        switch (serviceName) {
+            case "add":
+                requestFactory = new AddRequestFactory();
+                template = new AddSoapServiceTemplate();
+                break;
+            case "subtract":
+                requestFactory = new SubtractRequestFactory();
+                template = new SubtractSoapServiceTemplate();
+                break;
+            default:
+                System.err.println("Unknown SOAP service: " + serviceName);
+                return;
+        }
+
+        webServiceTemplate.setDefaultUri(wsdlUrl);
+        template.callSoapService(webServiceTemplate, requestFactory);
+    }
+}

@@ -1,0 +1,22 @@
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.ws.client.core.WebServiceTemplate;
+
+public abstract class SoapServiceTemplate {
+
+    private static final Logger logger = LoggerFactory.getLogger(SoapServiceTemplate.class);
+
+    public void callSoapService(WebServiceTemplate webServiceTemplate, SoapRequestFactory requestFactory) {
+        Object request = requestFactory.createRequest();
+
+        logRequest(request);
+
+        Object response = webServiceTemplate.marshalSendAndReceive(request);
+
+        logResponse(response);
+    }
+
+    protected abstract void logRequest(Object request);
+
+    protected abstract void logResponse(Object response);
+}

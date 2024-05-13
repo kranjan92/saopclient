@@ -1,0 +1,11 @@
+public class AddSoapServiceTemplate extends SoapServiceTemplate {
+    @Override
+    protected void logRequest(Object request) {
+        logger.info("Add SOAP Request: " + request);
+    }
+
+    @Override
+    protected void logResponse(Object response) {
+        logger.info("Add SOAP Response: " + response);
+    }
+}

@@ -1,0 +1,6 @@
+soap:
+  services:
+    add:
+      wsdl-url: http://www.dneonline.com/calculator.asmx?WSDL
+    subtract:
+      wsdl-url: http://www.dneonline.com/calculator.asmx?WSDL
