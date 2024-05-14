@@ -1,0 +1,94 @@
+package com.example.soapclient;
+
+import javax.xml.bind.annotation.*;
+import java.util.List;
+
+@XmlRootElement(name = "Envelope", namespace = "http://schemas.xmlsoap.org/soap/envelope/")
+@XmlAccessorType(XmlAccessType.FIELD)
+public class Envelope {
+
+    @XmlElement(name = "Header", namespace = "http://schemas.xmlsoap.org/soap/envelope/")
+    private Header header;
+
+    @XmlElement(name = "Body", namespace = "http://schemas.xmlsoap.org/soap/envelope/")
+    private Body body;
+
+    // Getters and Setters
+}
+
+@XmlAccessorType(XmlAccessType.FIELD)
+class Header {
+
+    @XmlElement(name = "LIJHeader", namespace = "http://www.learninjava.com/common/1_0")
+    private LIJHeader lijHeader;
+
+    // Getters and Setters
+}
+
+@XmlAccessorType(XmlAccessType.FIELD)
+class LIJHeader {
+
+    @XmlAttribute(name = "MsgID")
+    private String msgID;
+
+    @XmlAttribute(name = "Timestamp")
+    private String timestamp;
+
+    @XmlAttribute(name = "Version")
+    private String version;
+
+    // Getters and Setters
+}
+
+@XmlAccessorType(XmlAccessType.FIELD)
+class Body {
+
+    @XmlElement(name = "RunBatchJobRequest", namespace = "http://www.learninjava.com/soaptoobject/1_0/")
+    private RunBatchJobRequest runBatchJobRequest;
+
+    // Getters and Setters
+}
+
+@XmlAccessorType(XmlAccessType.FIELD)
+@XmlRootElement(name = "RunBatchJobRequest", namespace = "http://www.learninjava.com/soaptoobject/1_0/")
+class RunBatchJobRequest {
+
+    private String jobName;
+    private String repoName;
+    private String jobServerName;
+    private JobParameters jobParamerters;
+
+    // Getters and Setters
+}
+
+@XmlAccessorType(XmlAccessType.FIELD)
+class JobParameters {
+
+    private SubstiParameters substiParmeters;
+
+    // Getters and Setters
+}
+
+@XmlAccessorType(XmlAccessType.FIELD)
+class SubstiParameters {
+
+    @XmlElement(name = "parameter")
+    private List<Parameter> parameters;
+
+    // Getters and Setters
+}
+
+@XmlAccessorType(XmlAccessType.FIELD)
+class Parameter {
+
+    @XmlAttribute(name = "name")
+    private String name;
+
+    @XmlAttribute(name = "Code")
+    private String code;
+
+    @XmlValue
+    private String value;
+
+    // Getters and Setters
+}
