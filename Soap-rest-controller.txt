@@ -1,0 +1,52 @@
+@Service
+public class SoapService {
+
+    @Autowired
+    private ResourceLoader resourceLoader;
+
+    public String readSoapRequestTemplate() throws IOException {
+        Resource resource = resourceLoader.getResource("classpath:soap-request-template.xml");
+        InputStream inputStream = resource.getInputStream();
+        return new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
+    }
+
+   
+    @Autowired
+    private RestTemplate restTemplate;
+
+    public ResponseEntity<String> sendSoapRequest() throws IOException {
+        String soapRequest = readSoapRequestTemplate();
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.TEXT_XML);
+        HttpEntity<String> requestEntity = new HttpEntity<>(soapRequest, headers);
+        ResponseEntity<String> responseEntity = restTemplate.exchange("http://example.com/soap/service", HttpMethod.POST, requestEntity, String.class);
+        return responseEntity;
+    }
+	
+}
+
+
+@Configuration
+public class AppConfig {
+
+    @Bean
+    public RestTemplate restTemplate() {
+        return new RestTemplate();
+    }
+}
+
+
+@RestController
+public class SoapController {
+
+    @Autowired
+    private SoapService soapService;
+
+    @PostMapping("/sendSoapRequest")
+    public ResponseEntity<String> sendSoapRequest() throws IOException {
+        ResponseEntity<String> response = soapService.sendSoapRequest();
+        return response;
+    }
+}
+
+
