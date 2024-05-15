@@ -1,0 +1,35 @@
+public class SoapEnvelopeWrapper {
+
+    public static void main(String[] args) {
+        // Example XML message
+        String xmlMessage = "<ser:RunBatchJobRequest>" +
+                                "<jobName>cleaning_job</jobName>" +
+                                "<repoName>repo2</repoName>" +
+                                "<jobServerName>server1</jobServerName>" +
+                                "<jobParameters>" +
+                                    "<substiParameters>" +
+                                        "<parameter name=\"$$INPUT_DIR\" Code=\"1\">/file/input.bci</parameter>" +
+                                        "<parameter name=\"$$OUTPUT_DIR\" Code=\"1\">/file/output.bci</parameter>" +
+                                    "</substiParameters>" +
+                                "</jobParameters>" +
+                            "</ser:RunBatchJobRequest>";
+
+        // Define the SOAP envelope start and end tags
+        String soapEnvelopeStart = 
+            "<soapenv:Envelope xmlns:soapenv=\"http://schemas.xmlsoap.org/soap/envelope/\" " +
+            "xmlns:ser=\"http://www.learninjava.com/soaptoobject/1_0/serverx.xsd\">" +
+            "<soapenv:Header/><soapenv:Body>";
+        
+        String soapEnvelopeEnd = "</soapenv:Body></soapenv:Envelope>";
+
+        // Wrap the XML message with the SOAP envelope
+        String wrappedXmlMessage = wrapWithSoapEnvelope(xmlMessage, soapEnvelopeStart, soapEnvelopeEnd);
+
+        // Print the wrapped XML message
+        System.out.println(wrappedXmlMessage);
+    }
+
+    private static String wrapWithSoapEnvelope(String xmlMessage, String envelopeStart, String envelopeEnd) {
+        return envelopeStart + xmlMessage + envelopeEnd;
+    }
+}

@@ -1,0 +1,38 @@
+package com.example.soapclient;
+
+import org.springframework.boot.CommandLineRunner;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.annotation.Bean;
+
+@SpringBootApplication
+public class SoapClientApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(SoapClientApplication.class, args);
+    }
+
+    @Bean
+    CommandLineRunner run(SoapService soapService) {
+        return args -> {
+            if (args.length < 3) {
+                System.out.println("Usage: java -jar <jar-file> <jobName> <repoName> <jobServerName>");
+                return;
+            }
+
+            String jobName = args[0];
+            String repoName = args[1];
+            String jobServerName = args[2];
+
+            // Unmarshal the existing SOAP message
+            Envelope envelope = soapService.unmarshalSoapMessage();
+
+            // Modify the envelope with the provided arguments
+            envelope = soapService.modifyEnvelope(envelope, jobName, repoName, jobServerName);
+
+            // Marshal the modified envelope back to XML and print it
+            String modifiedXml = soapService.marshalSoapMessage(envelope);
+            System.out.println(modifiedXml);
+        };
+    }
+}
