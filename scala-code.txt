@@ -1,0 +1,55 @@
+import org.apache.spark.sql.{SparkSession, DataFrame}
+import org.apache.spark.sql.types._
+
+object MergeBCOAndCSV {
+  def main(args: Array[String]): Unit = {
+    // Create a SparkSession
+    val spark = SparkSession.builder()
+      .appName("Merge BCO and CSV Data")
+      .getOrCreate()
+
+    // Define file paths
+    val bcoFilePath = "path/to/your/bco/file.bco"
+    val csvFilePath = "path/to/your/csv/file.csv"
+    val outputFilePath = "path/to/output/merged.json"
+
+    // Define schema for BCO data with only relevant columns
+    val bcoSchema = new StructType()
+      .add("id", StringType, true)
+      .add("col7", StringType, true)
+      .add("name", StringType, true)
+
+    // Define schema for CSV data
+    val csvSchema = new StructType()
+      .add("id", StringType, true)
+      .add("department", StringType, true)
+      .add("salary", IntegerType, true)
+
+    // Read the BCO data with the defined schema
+    val bcoDF = spark.read
+      .option("delimiter", "|")
+      .schema(bcoSchema)
+      .csv(bcoFilePath)
+
+    // Read the CSV data with the defined schema and no header
+    val csvDF = spark.read
+      .schema(csvSchema)
+      .option("header", "false")
+      .csv(csvFilePath)
+
+    // Assign header to CSV dataframe manually
+    val csvDFWithHeader = csvDF.toDF("id", "department", "salary")
+
+    // Merge the dataframes on the common field 'id'
+    val mergedDF = bcoDF.join(csvDFWithHeader, Seq("id"), "inner")
+
+    // Show the merged dataframe
+    mergedDF.show()
+
+    // Save the merged dataframe as a JSON file
+    mergedDF.write.json(outputFilePath)
+
+    // Stop the Spark session
+    spark.stop()
+  }
+}
