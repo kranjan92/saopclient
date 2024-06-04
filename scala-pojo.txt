@@ -1,0 +1,121 @@
+import org.apache.spark.sql.SparkSession
+import io.circe._
+import io.circe.parser._
+import io.circe.generic.semiauto._
+import spark.implicits._
+
+// Step 1: Define the case classes with default values
+case class Address(street: String = "", city: String = "", postalCode: String = "")
+case class Contact(`type`: String = "", detail: String = "")
+case class Person(name: String = "", age: Int = 0, address: Address = Address(), contacts: List[Contact] = List())
+
+// Step 2: Create Spark Session
+val spark = SparkSession.builder
+  .appName("Spark Nested POJO Example with Circe")
+  .master("local[*]")
+  .getOrCreate()
+
+// Step 3: Custom decoders to handle missing fields
+implicit val decodeAddress: Decoder[Address] = deriveDecoder[Address].emap { address =>
+  Right(Address(
+    street = address.street.getOrElse(""),
+    city = address.city.getOrElse(""),
+    postalCode = address.postalCode.getOrElse("")
+  ))
+}
+
+implicit val decodeContact: Decoder[Contact] = deriveDecoder[Contact].emap { contact =>
+  Right(Contact(
+    `type` = contact.`type`.getOrElse(""),
+    detail = contact.detail.getOrElse("")
+  ))
+}
+
+implicit val decodePerson: Decoder[Person] = deriveDecoder[Person].emap { person =>
+  Right(Person(
+    name = person.name.getOrElse(""),
+    age = person.age.getOrElse(0),
+    address = person.address.getOrElse(Address()),
+    contacts = person.contacts.getOrElse(List())
+  ))
+}
+
+// Step 4: Read and parse JSON data
+val jsonData = """[
+  {
+    "name": "John",
+    "age": 30,
+    "address": {
+      "street": "123 Main St",
+      "city": "Anytown",
+      "postalCode": "12345"
+    },
+    "contacts": [
+      {
+        "type": "email",
+        "detail": "john@example.com"
+      },
+      {
+        "type": "phone",
+        "detail": "123-456-7890"
+      }
+    ]
+  },
+  {
+    "name": "Jane",
+    "age": 25,
+    "address": {
+      "street": "456 Maple Ave",
+      "city": "Othertown",
+      "postalCode": "67890"
+    },
+    "contacts": [
+      {
+        "type": "email",
+        "detail": "jane@example.com"
+      },
+      {
+        "type": "phone",
+        "detail": "987-654-3210"
+      }
+    ]
+  },
+  {
+    "name": "Tom",
+    "address": {
+      "street": "",
+      "city": "",
+      "postalCode": ""
+    },
+    "contacts": []
+  }
+]"""
+
+val parsedData = decode[List[Person]](jsonData) match {
+  case Right(data) => data
+  case Left(error) => throw new Exception("Failed to parse JSON", error)
+}
+
+val ds = spark.createDataset(parsedData)
+
+// Step 5: Map data to case class
+val transformedDS = ds.map(person => {
+  person.copy(
+    age = person.age + 1,
+    address = person.address.copy(city = person.address.city + " USA"),
+    contacts = person.contacts.map(contact => 
+      if (contact.`type` == "email") 
+        contact.copy(detail = contact.detail.toUpperCase) 
+      else 
+        contact
+    )
+  )
+})
+
+// Step 6: Perform actions
+transformedDS.show()
+val peopleList = transformedDS.collect().toList
+peopleList.foreach(println)
+
+// Stop the Spark session
+spark.stop()
