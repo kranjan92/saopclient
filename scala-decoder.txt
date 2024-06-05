@@ -1,0 +1,160 @@
+import org.apache.spark.sql.SparkSession
+import io.circe._
+import io.circe.parser._
+import org.apache.spark.sql.Encoder
+import org.apache.spark.sql.Encoders
+
+// Step 1: Define the case classes with default values
+case class Address(street: String = "", city: String = "", postalCode: String = "")
+case class Contact(`type`: String = "", detail: String = "")
+case class Person(name: String = "", age: Int = 0, address: Address = Address(), contacts: List[Contact] = List())
+
+// Define the new case classes
+case class NewAddress(location: String = "", zip: String = "")
+case class NewContact(contactType: String = "", info: String = "")
+case class NewPerson(fullName: String = "", years: Int = 0, newAddress: NewAddress = NewAddress(), newContacts: List[NewContact] = List())
+
+object CirceDecoders {
+  // Custom decoders to handle missing fields
+  implicit val decodeAddress: Decoder[Address] = new Decoder[Address] {
+    final def apply(c: HCursor): Decoder.Result[Address] =
+      for {
+        street <- c.downField("street").as[Option[String]]
+        city <- c.downField("city").as[Option[String]]
+        postalCode <- c.downField("postalCode").as[Option[String]]
+      } yield {
+        Address(
+          street = street.getOrElse(""),
+          city = city.getOrElse(""),
+          postalCode = postalCode.getOrElse("")
+        )
+      }
+  }
+
+  implicit val decodeContact: Decoder[Contact] = new Decoder[Contact] {
+    final def apply(c: HCursor): Decoder.Result[Contact] =
+      for {
+        `type` <- c.downField("type").as[Option[String]]
+        detail <- c.downField("detail").as[Option[String]]
+      } yield {
+        Contact(
+          `type` = `type`.getOrElse(""),
+          detail = detail.getOrElse("")
+        )
+      }
+  }
+
+  implicit val decodePerson: Decoder[Person] = new Decoder[Person] {
+    final def apply(c: HCursor): Decoder.Result[Person] =
+      for {
+        name <- c.downField("name").as[Option[String]]
+        age <- c.downField("age").as[Option[Int]]
+        address <- c.downField("address").as[Option[Address]]
+        contacts <- c.downField("contacts").as[Option[List[Contact]]]
+      } yield {
+        Person(
+          name = name.getOrElse(""),
+          age = age.getOrElse(0),
+          address = address.getOrElse(Address()),
+          contacts = contacts.getOrElse(List())
+        )
+      }
+  }
+}
+
+object SparkNestedPojoExample {
+  def main(args: Array[String]): Unit = {
+    // Step 3: Create Spark Session
+    val spark = SparkSession.builder
+      .appName("Spark Nested POJO Example with Circe")
+      .master("local[*]")
+      .getOrCreate()
+
+    import spark.implicits._
+    import CirceDecoders._
+
+    // Step 4: Read and parse JSON data
+    val jsonData = """[
+      {
+        "name": "John",
+        "age": 30,
+        "address": {
+          "street": "123 Main St",
+          "city": "Anytown",
+          "postalCode": "12345"
+        },
+        "contacts": [
+          {
+            "type": "email",
+            "detail": "john@example.com"
+          },
+          {
+            "type": "phone",
+            "detail": "123-456-7890"
+          }
+        ]
+      },
+      {
+        "name": "Jane",
+        "age": 25,
+        "address": {
+          "street": "456 Maple Ave",
+          "city": "Othertown",
+          "postalCode": "67890"
+        },
+        "contacts": [
+          {
+            "type": "email",
+            "detail": "jane@example.com"
+          },
+          {
+            "type": "phone",
+            "detail": "987-654-3210"
+          }
+        ]
+      },
+      {
+        "name": "Tom",
+        "address": {
+          "street": "",
+          "city": "",
+          "postalCode": ""
+        },
+        "contacts": []
+      }
+    ]"""
+
+    val parsedData = decode[List[Person]](jsonData) match {
+      case Right(data) => data
+      case Left(error) => throw new Exception("Failed to parse JSON", error)
+    }
+
+    // Convert List[Person] to Dataset
+    implicit val personEncoder: Encoder[Person] = Encoders.product[Person]
+    val ds = spark.createDataset(parsedData)
+
+    // Step 5: Define the transformation function
+    def transformPerson(person: Person): NewPerson = {
+      val newAddress = NewAddress(location = s"${person.address.street}, ${person.address.city}", zip = person.address.postalCode)
+      val newContacts = person.contacts.map(contact => NewContact(contactType = contact.`type`, info = contact.detail))
+    
+      NewPerson(
+        fullName = person.name,
+        years = person.age,
+        newAddress = newAddress,
+        newContacts = newContacts
+      )
+    }
+
+    // Step 6: Apply the transformation
+    val transformedDS = ds.map(transformPerson)
+
+    // Step 7: Perform actions
+    transformedDS.show()
+    val peopleList = transformedDS.collect().toList
+    peopleList.foreach(println)
+
+    // Stop the Spark session
+    spark.stop()
+  }
+}
