@@ -5,7 +5,6 @@ libraryDependencies ++= Seq(
   "org.apache.spark" %% "spark-sql" % "3.4.1"
 )
 
-
 import org.apache.spark.sql.SparkSession
 import io.circe._
 import io.circe.parser._
@@ -20,28 +19,28 @@ case class Person(name: String = "", age: Int = 0, address: Address = Address(),
 
 object CirceDecoders {
   // Step 2: Custom decoders to handle missing fields
-  implicit val decodeAddress: Decoder[Address] = deriveDecoder[Address].emap { address =>
-    Right(Address(
+  implicit val decodeAddress: Decoder[Address] = deriveDecoder[Address].map { address =>
+    Address(
       street = Option(address.street).getOrElse(""),
       city = Option(address.city).getOrElse(""),
       postalCode = Option(address.postalCode).getOrElse("")
-    ))
+    )
   }
 
-  implicit val decodeContact: Decoder[Contact] = deriveDecoder[Contact].emap { contact =>
-    Right(Contact(
+  implicit val decodeContact: Decoder[Contact] = deriveDecoder[Contact].map { contact =>
+    Contact(
       `type` = Option(contact.`type`).getOrElse(""),
       detail = Option(contact.detail).getOrElse("")
-    ))
+    )
   }
 
-  implicit val decodePerson: Decoder[Person] = deriveDecoder[Person].emap { person =>
-    Right(Person(
+  implicit val decodePerson: Decoder[Person] = deriveDecoder[Person].map { person =>
+    Person(
       name = Option(person.name).getOrElse(""),
       age = Option(person.age).getOrElse(0),
       address = Option(person.address).getOrElse(Address()),
       contacts = Option(person.contacts).getOrElse(List())
-    ))
+    )
   }
 }
 
