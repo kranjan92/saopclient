@@ -1,0 +1,18 @@
+src/main/scala/
+│
+├── pojo/
+│   ├── Address.scala
+│   ├── Contact.scala
+│   ├── Person.scala
+│   ├── NewAddress.scala
+│   ├── NewContact.scala
+│   └── NewPerson.scala
+│
+├── decoders/
+│   └── CirceDecoders.scala
+│
+├── transformations/
+│   └── Transformations.scala
+│
+└── app/
+    └── SparkNestedPojoExample.scala

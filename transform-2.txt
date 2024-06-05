@@ -1,0 +1,17 @@
+package transformations
+
+import pojo._
+
+object Transformations {
+  def transformPerson(person: Person): NewPerson = {
+    val newAddress = NewAddress(location = s"${person.address.street}, ${person.address.city}", zip = person.address.postalCode)
+    val newContacts = person.contacts.map(contact => NewContact(contactType = contact.`type`, info = contact.detail))
+
+    NewPerson(
+      fullName = person.name,
+      years = person.age,
+      newAddress = newAddress,
+      newContacts = newContacts
+    )
+  }
+}

@@ -1,0 +1,94 @@
+package app
+
+import org.apache.spark.sql.SparkSession
+import io.circe._
+import io.circe.parser._
+import org.apache.spark.sql.Encoder
+import org.apache.spark.sql.Encoders
+import pojo._
+import decoders._
+import transformations.Transformations._
+
+object SparkNestedPojoExample {
+  def main(args: Array[String]): Unit = {
+    // Create Spark Session
+    val spark = SparkSession.builder
+      .appName("Spark Nested POJO Example with Circe")
+      .master("local[*]")
+      .getOrCreate()
+
+    import spark.implicits._
+    import CirceDecoders._
+
+    // Read and parse JSON data
+    val jsonData = """[
+      {
+        "name": "John",
+        "age": 30,
+        "address": {
+          "street": "123 Main St",
+          "city": "Anytown",
+          "postalCode": "12345"
+        },
+        "contacts": [
+          {
+            "type": "email",
+            "detail": "john@example.com"
+          },
+          {
+            "type": "phone",
+            "detail": "123-456-7890"
+          }
+        ]
+      },
+      {
+        "name": "Jane",
+        "age": 25,
+        "address": {
+          "street": "456 Maple Ave",
+          "city": "Othertown",
+          "postalCode": "67890"
+        },
+        "contacts": [
+          {
+            "type": "email",
+            "detail": "jane@example.com"
+          },
+          {
+            "type": "phone",
+            "detail": "987-654-3210"
+          }
+        ]
+      },
+      {
+        "name": "Tom",
+        "address": {
+          "street": "",
+          "city": "",
+          "postalCode": ""
+        },
+        "contacts": []
+      }
+    ]"""
+
+    val parsedData = decode[List[Person]](jsonData) match {
+      case Right(data) => data
+      case Left(error) => throw new Exception("Failed to parse JSON", error)
+    }
+
+    // Convert List[Person] to Dataset
+    implicit val personEncoder: Encoder[Person] = Encoders.product[Person]
+    val ds = spark.createDataset(parsedData)
+
+    // Apply the transformation
+    val transformedDS = ds.map(transformPerson)
+
+    // Perform actions
+    transformedDS.show()
+    val peopleList = transformedDS.collect().toList
+    peopleList.foreach(println)
+
+    // Stop the Spark session
+    spark.stop()
+  }
+}

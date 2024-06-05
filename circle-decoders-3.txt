@@ -1,0 +1,52 @@
+package decoders
+
+import io.circe._
+import pojo._
+
+object CirceDecoders {
+  // Custom decoders to handle missing fields
+  implicit val decodeAddress: Decoder[Address] = new Decoder[Address] {
+    final def apply(c: HCursor): Decoder.Result[Address] =
+      for {
+        street <- c.downField("street").as[Option[String]]
+        city <- c.downField("city").as[Option[String]]
+        postalCode <- c.downField("postalCode").as[Option[String]]
+      } yield {
+        Address(
+          street = street.getOrElse(""),
+          city = city.getOrElse(""),
+          postalCode = postalCode.getOrElse("")
+        )
+      }
+  }
+
+  implicit val decodeContact: Decoder[Contact] = new Decoder[Contact] {
+    final def apply(c: HCursor): Decoder.Result[Contact] =
+      for {
+        `type` <- c.downField("type").as[Option[String]]
+        detail <- c.downField("detail").as[Option[String]]
+      } yield {
+        Contact(
+          `type` = `type`.getOrElse(""),
+          detail = detail.getOrElse("")
+        )
+      }
+  }
+
+  implicit val decodePerson: Decoder[Person] = new Decoder[Person] {
+    final def apply(c: HCursor): Decoder.Result[Person] =
+      for {
+        name <- c.downField("name").as[Option[String]]
+        age <- c.downField("age").as[Option[Int]]
+        address <- c.downField("address").as[Option[Address]]
+        contacts <- c.downField("contacts").as[Option[List[Contact]]]
+      } yield {
+        Person(
+          name = name.getOrElse(""),
+          age = age.getOrElse(0),
+          address = address.getOrElse(Address()),
+          contacts = contacts.getOrElse(List())
+        )
+      }
+  }
+}
