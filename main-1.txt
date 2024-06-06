@@ -91,4 +91,29 @@ object SparkNestedPojoExample {
     // Stop the Spark session
     spark.stop()
   }
+
+// Read JSON file into DataFrame
+    val df = spark.read.text("path/to/your/input.json")
+
+    // Function to transform each JSON string
+    def transformJson(jsonStr: String): Option[CustomRequestModel] = {
+      decode[CustomRequestModel](jsonStr) match {
+        case Right(model) => Some(model)
+        case Left(error) =>
+          println(s"Failed to parse JSON: $error")
+          None
+      }
+    }
+
+    // Convert DataFrame to Dataset and transform JSON strings
+    val customRequestDS: Dataset[CustomRequestModel] = df.flatMap(row => transformJson(row.getString(0)))
+
+    // Write the Dataset back to JSON
+    val outputJson: Dataset[String] = customRequestDS.map(_.asJson.noSpaces)
+    outputJson.write.text("path/to/output.json")
+
+    // Stop Spark session
+    spark.stop()
+
+
 }
