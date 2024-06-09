@@ -1,0 +1,192 @@
+package transformers
+
+trait Transformer[A, B] {
+  def transform(source: A): B
+}
+
+
+----
+
+package transformers
+
+import models.{RegisteredAddress, MailingAddress, AddressDetails}
+
+class RegisteredAddressToAddressDetails extends Transformer[RegisteredAddress, AddressDetails] {
+  override def transform(source: RegisteredAddress): AddressDetails = {
+    AddressDetails(city = source.city, postalCode = source.zip)
+  }
+}
+
+class MailingAddressToAddressDetails extends Transformer[MailingAddress, AddressDetails] {
+  override def transform(source: MailingAddress): AddressDetails = {
+    AddressDetails(city = source.city, postalCode = source.zip)
+  }
+}
+
+--------
+
+package transformers
+
+import models.{RegisteredAddress, MailingAddress, AddressDetails}
+
+class RegisteredAddressToAddressDetails extends Transformer[RegisteredAddress, AddressDetails] {
+  override def transform(source: RegisteredAddress): AddressDetails = {
+    AddressDetails(city = source.city, postalCode = source.zip)
+  }
+}
+
+class MailingAddressToAddressDetails extends Transformer[MailingAddress, AddressDetails] {
+  override def transform(source: MailingAddress): AddressDetails = {
+    AddressDetails(city = source.city, postalCode = source.zip)
+  }
+}
+
+-------
+
+package transformers
+
+import models.{Employee, EmployeeDetails, AddressDetails, RegisteredAddress, MailingAddress}
+
+class EmployeeToEmployeeDetails(
+  registeredAddressTransformer: Transformer[RegisteredAddress, AddressDetails],
+  mailingAddressTransformer: Transformer[MailingAddress, AddressDetails]
+) extends Transformer[Employee, EmployeeDetails] {
+  override def transform(source: Employee): EmployeeDetails = {
+    val addresses = List(
+      source.registeredAddress.map(registeredAddressTransformer.transform),
+      source.mailingAddress.map(mailingAddressTransformer.transform)
+    ).flatten
+
+    EmployeeDetails(
+      empId = source.id,
+      fullName = source.name,
+      addresses = addresses
+    )
+  }
+}
+
+
+-----------
+
+package transformers
+
+import models.{Company, Employee, EmployeeDetails}
+
+class CompanyTransformer(employeeTransformer: Transformer[Employee, EmployeeDetails]) extends Transformer[(String, String, List[Employee]), Company] {
+  override def transform(source: (String, String, List[Employee])): Company = {
+    val (name, location, employees) = source
+    val employeeDetails = employees.map(employeeTransformer.transform)
+    Company(name, location, employeeDetails)
+  }
+}
+
+
+package main
+
+import models._
+import transformers._
+import org.apache.spark.sql.{Dataset, SparkSession}
+import org.apache.spark.sql.functions._
+
+object TransformerExample extends App {
+  // Instantiate transformers
+  val registeredAddressTransformer = new RegisteredAddressToAddressDetails
+  val mailingAddressTransformer = new MailingAddressToAddressDetails
+  val employeeTransformer = new EmployeeToEmployeeDetails(registeredAddressTransformer, mailingAddressTransformer)
+  val companyTransformer = new CompanyTransformer(employeeTransformer)
+
+  // Sample data
+  val employees = List(
+    Employee(1, "John Doe", Some(RegisteredAddress("New York", "10001")), Some(MailingAddress("Los Angeles", "90001"))),
+    Employee(2, "Jane Smith", None, Some(MailingAddress("San Francisco", "94101"))),
+    Employee(3, "Alice Johnson", Some(RegisteredAddress("Chicago", "60601")), None)
+  )
+
+  // Company sample data
+  val companyData = ("Acme Corp", "New York", employees)
+
+  // Transform data
+  val employeeDetails = employees.map(employeeTransformer.transform)
+  val company = companyTransformer.transform(companyData)
+
+  // Print transformed data
+  println(company)
+
+  // Set up Spark
+  val spark = SparkSession.builder()
+    .appName("POJO Mapping Example")
+    .master("local")
+    .getOrCreate()
+
+  import spark.implicits._
+
+  // Convert list to Dataset
+  val employeeDS: Dataset[Employee] = spark.createDataset(employees)
+
+  // Define a UDF for transformation
+  val employeeDetailsUDF = udf((id: Int, name: String, regCity: Option[String], regZip: Option[String], mailCity: Option[String], mailZip: Option[String]) => {
+    val registeredAddress = for {
+      city <- regCity
+      zip <- regZip
+    } yield RegisteredAddress(city, zip)
+
+    val mailingAddress = for {
+      city <- mailCity
+      zip <- mailZip
+    } yield MailingAddress(city, zip)
+
+    employeeTransformer.transform(Employee(id, name, registeredAddress, mailingAddress))
+  })
+
+  // Transform the dataset
+  val employeeDetailsDS: Dataset[EmployeeDetails] = employeeDS
+    .withColumn("regCity", $"registeredAddress.city")
+    .withColumn("regZip", $"registeredAddress.zip")
+    .withColumn("mailCity", $"mailingAddress.city")
+    .withColumn("mailZip", $"mailingAddress.zip")
+    .withColumn("details", employeeDetailsUDF(
+      col("id"), col("name"),
+      col("regCity"), col("regZip"),
+      col("mailCity"), col("mailZip")
+    ))
+    .select("details.*")
+    .as[EmployeeDetails]
+
+  // Assuming Company data is available in a suitable format for transformation
+  val companyDS: Dataset[(String, String, List[Employee])] = spark.createDataset(Seq(companyData))
+
+  val companyDetailsUDF = udf((name: String, location: String, employees: Seq[Row]) => {
+    val employeeList = employees.map { row =>
+      val id = row.getInt(0)
+      val name = row.getString(1)
+      val regCity = Option(row.getAs )
+      val regZip = Option(row.getAs )
+      val mailCity = Option(row.getAs )
+      val mailZip = Option(row.getAs )
+
+      val registeredAddress = for {
+        city <- regCity
+        zip <- regZip
+      } yield RegisteredAddress(city, zip)
+
+      val mailingAddress = for {
+        city <- mailCity
+        zip <- mailZip
+      } yield MailingAddress(city, zip)
+
+      Employee(id, name, registeredAddress, mailingAddress)
+    }.toList
+
+    companyTransformer.transform((name, location, employeeList))
+  })
+
+  val companyDetailsDS: Dataset[Company] = companyDS
+    .withColumn("employees", array($"_3.*"))
+    .withColumn("details", companyDetailsUDF(
+      col("_1"), col("_2"), col("employees")
+    ))
+    .select("details.*")
+    .as[Company]
+
+  companyDetailsDS.show()
+}
