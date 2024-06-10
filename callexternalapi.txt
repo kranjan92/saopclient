@@ -1,0 +1,91 @@
+package services
+
+import sttp.client3._
+import sttp.client3.circe._
+import io.circe.generic.auto._
+import models._
+
+object ApiService {
+  private val backend = HttpURLConnectionBackend()
+
+  def callExternalApi(employeeDetails: EmployeeDetails): Either[String, EmployeeDetails] = {
+    val request = basicRequest
+      .post(uri"https://api.example.com/employee")
+      .body(employeeDetails)
+      .response(asJson[EmployeeDetails])
+
+    val response = request.send(backend)
+
+    response.body match {
+      case Right(employeeResponse) => Right(employeeResponse)
+      case Left(error) => Left(s"Error calling API for employee ${employeeDetails.empId}: $error")
+    }
+  }
+}
+
+
+-------------------------------------------------------
+
+package main
+
+import org.apache.spark.sql.{Dataset, SparkSession}
+import models._
+import services.ApiService
+import org.apache.spark.sql.functions._
+
+object ApiProcessor extends App {
+  // Sample EmployeeDetails data (replace this with actual data)
+  val employeeDetailsList = Seq(
+    EmployeeDetails(Some(1), List(NameDetails(Some("John Doe"))), List(AddressDetails(Some("New York"), Some("10001")), AddressDetails(Some("Los Angeles"), Some("90001")))),
+    EmployeeDetails(Some(2), List(NameDetails(Some("Jane Smith"))), List(AddressDetails(Some("San Francisco"), Some("94101")))),
+    EmployeeDetails(Some(3), List(NameDetails(Some("Invalid Employee"))), List(AddressDetails(Some("Unknown"), Some("00000"))))
+  )
+
+  // Set up Spark
+  val spark = SparkSession.builder()
+    .appName("API Processor Example")
+    .master("local")
+    .getOrCreate()
+
+  import spark.implicits._
+
+  // Create a Dataset of EmployeeDetails
+  val employeeDetailsDS: Dataset[EmployeeDetails] = spark.createDataset(employeeDetailsList)
+
+  // Function to handle API call for each partition and segregate valid/invalid records
+  def processPartition(partition: Iterator[EmployeeDetails]): Iterator[(Either[String, EmployeeDetails], EmployeeDetails)] = {
+    partition.map { employeeDetails =>
+      val apiResponse = ApiService.callExternalApi(employeeDetails)
+      (apiResponse, employeeDetails)
+    }
+  }
+
+  // Apply processPartition to each partition and collect the results
+  val resultsDS = employeeDetailsDS.mapPartitions(processPartition)
+
+  // Separate valid and invalid records using the resultsDS
+  val (validRecords, invalidRecords) = resultsDS.collect().partition {
+    case (Right(_), _) => true
+    case _ => false
+  }
+
+  // Convert validRecords to Dataset
+  val validRecordsDS: Dataset[EmployeeDetails] = spark.createDataset(validRecords.map {
+    case (Right(employeeDetails), _) => employeeDetails
+  })
+
+  // Convert invalidRecords to Dataset of error messages
+  val invalidRecordsDS = spark.createDataset(invalidRecords.map {
+    case (Left(error), employeeDetails) => (employeeDetails.empId.getOrElse(-1), error)
+  }).toDF("empId", "error")
+
+  // Show and store valid records
+  validRecordsDS.show(false)
+  validRecordsDS.write.json("/path/to/output/valid_employees")
+
+  // Show and store invalid records
+  invalidRecordsDS.show(false)
+  invalidRecordsDS.write.json("/path/to/output/invalid_employees")
+
+  spark.stop()
+}
