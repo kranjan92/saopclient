@@ -1,0 +1,199 @@
+libraryDependencies ++= Seq(
+  "org.apache.spark" %% "spark-sql" % "3.0.1",
+  "org.json4s" %% "json4s-native" % "3.6.11"
+)
+
+import org.apache.spark.sql.{Dataset, SparkSession}
+import org.apache.spark.sql.functions._
+import org.apache.spark.sql.Encoders
+import spark.implicits._
+import scala.collection.JavaConverters._
+import org.json4s.native.Serialization
+import org.json4s.native.Serialization.write
+import org.json4s.{NoTypeHints, Formats}
+
+// Define case classes
+case class SourcePrimaryAddress(
+  street: Option[String],
+  city: Option[String],
+  state: Option[String],
+  country: Option[String]
+)
+
+case class SourceMailingAddress(
+  street: Option[String],
+  city: Option[String],
+  state: Option[String],
+  country: Option[String]
+)
+
+case class SourceContactDetails(
+  email: Option[String],
+  phone: Option[String]
+)
+
+case class SourceEmployee(
+  employeeId: Option[String],
+  firstName: Option[String],
+  lastName: Option[String],
+  age: Option[Int],
+  primaryaddress: Option[SourcePrimaryAddress],
+  mailingaddress: Option[SourceMailingAddress],
+  contactDetails: Option[SourceContactDetails],
+  department: Option[String],
+  position: Option[String]
+)
+
+case class SignOnReq(accessid: String, trnid: String, reqType: String)
+case class Employeename(employeeList: List[EmployeeNameList])
+case class EmployeeNameList(empName: String)
+case class EmpNo(empID: String)
+case class Url(urlentrylist: List[UrlList])
+case class UrlList(url: String)
+
+case class TargetEmployeeList(
+  recid: Int,
+  empNo: EmpNo,
+  empName: Employeename,
+  age: Int,
+  email: String,
+  phone: String,
+  url: Url,
+  location: String,
+  department: String,
+  jobTitle: String
+)
+
+case class CsReq(tgtEmpList: List[TargetEmployeeList])
+case class TargetEmployeesMapper(signonreq: SignOnReq, csreq: CsReq)
+
+// Builder class for TargetEmployeeList
+class TargetEmployeeListBuilder {
+  private var recid: Int = _
+  private var empNo: EmpNo = _
+  private var empName: Employeename = _
+  private var age: Int = _
+  private var email: String = _
+  private var phone: String = _
+  private var url: Url = _
+  private var location: String = _
+  private var department: String = _
+  private var jobTitle: String = _
+
+  def withRecid(recid: Int): TargetEmployeeListBuilder = {
+    this.recid = recid
+    this
+  }
+
+  def withEmpNo(empNo: EmpNo): TargetEmployeeListBuilder = {
+    this.empNo = empNo
+    this
+  }
+
+  def withEmpName(empName: Employeename): TargetEmployeeListBuilder = {
+    this.empName = empName
+    this
+  }
+
+  def withAge(age: Int): TargetEmployeeListBuilder = {
+    this.age = age
+    this
+  }
+
+  def withEmail(email: String): TargetEmployeeListBuilder = {
+    this.email = email
+    this
+  }
+
+  def withPhone(phone: String): TargetEmployeeListBuilder = {
+    this.phone = phone
+    this
+  }
+
+  def withUrl(url: Url): TargetEmployeeListBuilder = {
+    this.url = url
+    this
+  }
+
+  def withLocation(location: String): TargetEmployeeListBuilder = {
+    this.location = location
+    this
+  }
+
+  def withDepartment(department: String): TargetEmployeeListBuilder = {
+    this.department = department
+    this
+  }
+
+  def withJobTitle(jobTitle: String): TargetEmployeeListBuilder = {
+    this.jobTitle = jobTitle
+    this
+  }
+
+  def build(): TargetEmployeeList = {
+    TargetEmployeeList(
+      recid = recid,
+      empNo = empNo,
+      empName = empName,
+      age = age,
+      email = email,
+      phone = phone,
+      url = url,
+      location = location,
+      department = department,
+      jobTitle = jobTitle
+    )
+  }
+}
+
+// Function to map SourceEmployee to TargetEmployeesMapper using the builder
+def mapSourceToTarget(source: SourceEmployee, recid: Int): TargetEmployeesMapper = {
+  val builder = new TargetEmployeeListBuilder()
+    .withRecid(recid)
+    .withEmpNo(EmpNo(source.employeeId.getOrElse("")))
+    .withEmpName(Employeename(List(EmployeeNameList(s"${source.firstName.getOrElse("")} ${source.lastName.getOrElse("")}".trim))))
+    .withAge(source.age.getOrElse(0))
+    .withEmail(source.contactDetails.flatMap(_.email).getOrElse(""))
+    .withPhone(source.contactDetails.flatMap(_.phone).getOrElse(""))
+    .withUrl(Url(List(UrlList("http://example.com")))) // Assuming a static URL as an example
+    .withLocation(source.primaryaddress.map(addr => s"${addr.city.getOrElse("")}, ${addr.state.getOrElse("")}, ${addr.country.getOrElse("")}".trim).getOrElse(""))
+    .withDepartment(source.department.getOrElse(""))
+    .withJobTitle(source.position.getOrElse(""))
+
+  val targetEmployeeList = builder.build()
+
+  val signonreq = SignOnReq("accessId", "trnId", "reqType")
+  val csreq = CsReq(List(targetEmployeeList))
+
+  TargetEmployeesMapper(signonreq, csreq)
+}
+
+val spark = SparkSession.builder()
+  .appName("Source to Target Mapping")
+  .master("local[*]")
+  .getOrCreate()
+
+import spark.implicits._
+
+// Sample source data
+val sourceData = Seq(
+  SourceEmployee(
+    Some("E123"), Some("John"), Some("Doe"), Some(30),
+    Some(SourcePrimaryAddress(Some("123 Main St"), Some("Springfield"), Some("IL"), Some("USA"))),
+    Some(SourceMailingAddress(Some("PO Box 456"), Some("Springfield"), Some("IL"), Some("USA"))),
+    Some(SourceContactDetails(Some("john.doe@example.com"), Some("555-1234"))),
+    Some("Engineering"), Some("Software Engineer")
+  ),
+  // Add more sample data as needed
+).toDS()
+
+// Apply the mapping function
+val targetData: Dataset[String] = sourceData.zipWithIndex.map {
+  case (sourceEmployee, index) =>
+    implicit val formats: Formats = Serialization.formats(NoTypeHints)
+    val targetMapper = mapSourceToTarget(sourceEmployee, index.toInt)
+    write(targetMapper)
+}
+
+// Show the JSON requests
+targetData.show(false)
