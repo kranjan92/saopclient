@@ -1,0 +1,74 @@
+package app
+
+import org.apache.spark.sql.{Dataset, SparkSession}
+import models._
+import builders.TargetEmployeeListBuilder
+import org.json4s.native.Serialization
+import org.json4s.native.Serialization.write
+import org.json4s.{NoTypeHints, Formats}
+import scala.collection.JavaConverters._
+import org.apache.spark.sql.functions._
+import spark.implicits._
+
+object MainApp {
+  def mapSourceToTarget(source: SourceEmployee, recid: Int): TargetEmployeesMapper = {
+    val addresses = List(
+      source.primaryaddress.map(pa => Address(pa.street.getOrElse(""), pa.city.getOrElse(""), pa.state.getOrElse(""), pa.country.getOrElse(""))),
+      source.mailingaddress.map(ma => Address(ma.street.getOrElse(""), ma.city.getOrElse(""), ma.state.getOrElse(""), ma.country.getOrElse("")))
+    ).flatten
+
+    val builder = new TargetEmployeeListBuilder()
+      .withRecid(recid)
+      .withEmpNo(EmpNo(source.employeeId.getOrElse("")))
+      .withEmpName(Employeename(List(EmployeeNameList(s"${source.firstName.getOrElse("")} ${source.lastName.getOrElse("")}".trim))))
+      .withAge(source.age.getOrElse(0))
+      .withEmail(source.contactDetails.flatMap(_.email).getOrElse(""))
+      .withPhone(source.contactDetails.flatMap(_.phone).getOrElse(""))
+      .withUrl(Url(List(UrlList("http://example.com")))) // Assuming a static URL as an example
+      .withLocation(source.primaryaddress.map(addr => s"${addr.city.getOrElse("")}, ${addr.state.getOrElse("")}, ${addr.country.getOrElse("")}".trim).getOrElse(""))
+      .withDepartment(source.department.getOrElse(""))
+      .withJobTitle(source.position.getOrElse(""))
+      .withAddressList(AddressList(addresses))
+
+    val targetEmployeeList = builder.build()
+
+    val signonreq = SignOnReq("accessId", "trnId", "reqType")
+    val csreq = CsReq(List(targetEmployeeList))
+
+    TargetEmployeesMapper(signonreq, csreq)
+  }
+
+  def main(args: Array[String]): Unit = {
+    val spark = SparkSession.builder()
+      .appName("Source to Target Mapping")
+      .master("local[*]")
+      .getOrCreate()
+
+    import spark.implicits._
+
+    // Sample source data
+    val sourceData = Seq(
+      SourceEmployee(
+        Some("E123"), Some("John"), Some("Doe"), Some(30),
+        Some(SourcePrimaryAddress(Some("123 Main St"), Some("Springfield"), Some("IL"), Some("USA"))),
+        Some(SourceMailingAddress(Some("PO Box 456"), Some("Springfield"), Some("IL"), Some("USA"))),
+        Some(SourceContactDetails(Some("john.doe@example.com"), Some("555-1234"))),
+        Some("Engineering"), Some("Software Engineer")
+      ),
+      // Add more sample data as needed
+    ).toDS()
+
+    // Apply the mapping function
+    val targetData: Dataset[String] = sourceData.zipWithIndex.map {
+      case (sourceEmployee, index) =>
+        implicit val formats: Formats = Serialization.formats(NoTypeHints)
+        val targetMapper = mapSourceToTarget(sourceEmployee, index.toInt)
+        write(targetMapper)
+    }
+
+    // Show the JSON requests
+    targetData.show(false)
+
+    spark.stop()
+  }
+}
