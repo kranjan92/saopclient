@@ -1,0 +1,43 @@
+
+
+import org.apache.spark.sql.{SparkSession, DataFrame}
+
+object PipeSeparatedFileProcessor {
+  def main(args: Array[String]): Unit = {
+    // Initialize SparkSession
+    val spark = SparkSession.builder()
+      .appName("PipeSeparatedFileProcessor")
+      .master("local[*]")
+      .getOrCreate()
+
+    import spark.implicits._
+
+    // Define the path to the input file and output file
+    val inputFilePath = "path/to/input.psv"
+    val outputFilePath = "path/to/output.psv"
+
+    // Read the pipe-separated file into a DataFrame without header
+    val df = spark.read
+      .option("delimiter", "|")
+      .option("header", "false")
+      .csv(inputFilePath)
+
+    // Assign column names based on indices (e.g., "_c0", "_c1", "_c2", etc.)
+    val columnNames = df.columns.indices.map(i => s"_c$i").toList
+
+    // Create a DataFrame with the assigned column names
+    val dfWithColumns = df.toDF(columnNames: _*)
+
+    // Select specific columns by their indices
+    val selectedColumns = dfWithColumns.select("_c0", "_c2", "_c3")  // replace with your desired column indices
+
+    // Write the output to a new pipe-separated file
+    selectedColumns.write
+      .option("delimiter", "|")
+      .option("header", "false")
+      .csv(outputFilePath)
+
+    // Stop the SparkSession
+    spark.stop()
+  }
+}
