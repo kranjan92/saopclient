@@ -1,0 +1,94 @@
+-- Step 1: Normalize and Tokenize Addresses
+CREATE OR REPLACE TABLE normalized_addresses1 AS
+SELECT 
+    id,
+    SPLIT(LOWER(REPLACE(address, ' ', '')), ' ') AS tokens
+FROM 
+    table1;
+
+CREATE OR REPLACE TABLE normalized_addresses2 AS
+SELECT 
+    id,
+    SPLIT(LOWER(REPLACE(address, ' ', '')), ' ') AS tokens
+FROM 
+    table2;
+
+-- Step 2: Calculate Term Frequencies (TF)
+CREATE OR REPLACE TABLE term_frequencies1 AS
+SELECT 
+    id,
+    token.value AS token,
+    COUNT(*) AS term_frequency
+FROM 
+    normalized_addresses1,
+    LATERAL FLATTEN(INPUT => tokens) AS token
+GROUP BY 
+    id, token.value;
+
+CREATE OR REPLACE TABLE term_frequencies2 AS
+SELECT 
+    id,
+    token.value AS token,
+    COUNT(*) AS term_frequency
+FROM 
+    normalized_addresses2,
+    LATERAL FLATTEN(INPUT => tokens) AS token
+GROUP BY 
+    id, token.value;
+
+-- Step 3: Calculate Document Frequencies (DF)
+CREATE OR REPLACE TABLE document_frequencies AS
+SELECT 
+    token,
+    COUNT(DISTINCT id) AS document_frequency
+FROM 
+    (SELECT token FROM term_frequencies1
+     UNION ALL
+     SELECT token FROM term_frequencies2)
+GROUP BY 
+    token;
+
+-- Step 4: Compute TF-IDF Scores
+CREATE OR REPLACE TABLE tf_idf1 AS
+SELECT 
+    tf.id,
+    tf.token,
+    (tf.term_frequency / df.document_frequency) AS tf_idf
+FROM 
+    term_frequencies1 tf
+JOIN 
+    document_frequencies df
+ON 
+    tf.token = df.token;
+
+CREATE OR REPLACE TABLE tf_idf2 AS
+SELECT 
+    tf.id,
+    tf.token,
+    (tf.term_frequency / df.document_frequency) AS tf_idf
+FROM 
+    term_frequencies2 tf
+JOIN 
+    document_frequencies df
+ON 
+    tf.token = df.token;
+
+-- Step 5: Calculate Cosine Similarity
+CREATE OR REPLACE TABLE cosine_similarity AS
+SELECT
+    t1.id AS id1,
+    t2.id AS id2,
+    SUM(t1.tf_idf * t2.tf_idf) / 
+    (SQRT(SUM(t1.tf_idf * t1.tf_idf)) * SQRT(SUM(t2.tf_idf * t2.tf_idf))) * 100 AS similarity_percentage
+FROM 
+    tf_idf1 t1
+JOIN 
+    tf_idf2 t2
+ON 
+    t1.token = t2.token
+GROUP BY 
+    t1.id, t2.id;
+
+-- Step 6: View Results
+SELECT * FROM cosine_similarity
+ORDER BY similarity_percentage DESC;
