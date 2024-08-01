@@ -1,0 +1,82 @@
+import akka.actor.ActorSystem
+import akka.http.scaladsl.Http
+import akka.http.scaladsl.model._
+import akka.stream.ActorMaterializer
+import scala.concurrent.{ExecutionContext, Future}
+import scala.util.{Failure, Success}
+import akka.pattern.after
+
+object ApiCaller {
+  implicit val system: ActorSystem = ActorSystem()
+  implicit val materializer: ActorMaterializer = ActorMaterializer()
+  implicit val ec: ExecutionContext = system.dispatcher
+
+  def callApi(record: String): Future[String] = {
+    val request = HttpRequest(
+      method = HttpMethods.POST,
+      uri = "http://your-api-endpoint.com/endpoint",
+      entity = HttpEntity(ContentTypes.`application/json`, record)
+    )
+    
+    Http().singleRequest(request).flatMap { response =>
+      response.entity.toStrict(5000).map(_.data.utf8String)
+    }
+  }
+
+  def retry[T](f: => Future[T], retries: Int = 3): Future[T] = {
+    f.recoverWith {
+      case _ if retries > 0 => after(2.seconds, system.scheduler)(retry(f, retries - 1))
+    }
+  }
+}
+
+
+
+-------------------------------------------------------------------------------------------------
+
+import org.apache.spark.sql.SparkSession
+import org.apache.spark.rdd.RDD
+import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.concurrent.duration._
+
+object SparkApiJob {
+  val spark: SparkSession = SparkSession.builder
+    .appName("Spark API Call Example")
+    .master("local[*]")
+    .getOrCreate()
+
+  import spark.implicits._
+  import ApiCaller._
+
+  def main(args: Array[String]): Unit = {
+    // Load your data
+    val data: RDD[String] = spark.read.textFile("path/to/large/dataset").rdd
+
+    // Ensure the implicit ExecutionContext is available
+    implicit val ec: ExecutionContext = spark.sparkContext.getConf.getExecutorEnv
+      .getOrElse("spark.executorEnv", ExecutionContext.global)
+
+    // Call the API for each record
+    val results: RDD[Future[String]] = data.map { record =>
+      retry(callApi(record))
+    }
+
+    // Collect and process responses
+    val collectedFutures: Array[Future[String]] = results.collect()
+
+    val allFutures: Future[Array[String]] = Future.sequence(collectedFutures)
+
+    // Wait for all futures to complete before stopping the Spark session
+    allFutures.onComplete {
+      case Success(responses) =>
+        responses.foreach(response => println(s"API response: $response"))
+        spark.stop()
+      case Failure(exception) =>
+        println(s"API call failed: $exception")
+        spark.stop()
+    }
+
+    // Await the completion of all futures to keep the application running
+    Await.ready(allFutures, Duration.Inf)
+  }
+}
