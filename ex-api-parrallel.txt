@@ -1,0 +1,166 @@
+import akka.actor.ActorSystem
+import akka.http.scaladsl.Http
+import akka.http.scaladsl.model._
+import akka.stream.{ActorMaterializer, Materializer}
+import io.circe.parser.decode
+import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.duration._
+import java.util.concurrent.Semaphore
+import akka.pattern.after
+
+object ApiCaller {
+  implicit val system: ActorSystem = ActorSystem()
+  implicit val ec: ExecutionContext = system.dispatcher
+  implicit val materializer: Materializer = ActorMaterializer()
+
+  // Semaphore to limit the number of concurrent requests
+  val semaphore = new Semaphore(20) // Limit to 20 concurrent requests
+
+  def callApi(record: String): Future[ApiResponse] = {
+    val request = HttpRequest(
+      method = HttpMethods.POST,
+      uri = "http://your-api-endpoint.com/endpoint",
+      entity = HttpEntity(ContentTypes.`application/json`, record)
+    )
+
+    // Acquire semaphore permit before making the request
+    Future {
+      semaphore.acquire()
+      Http().singleRequest(request).flatMap { response =>
+        response.entity.toStrict(5000).map { entity =>
+          decode[ApiResponse](entity.data.utf8String) match {
+            case Right(apiResponse) => apiResponse
+            case Left(error) => throw new Exception(s"Failed to decode response: $error")
+          }
+        }
+      }
+    }.map { result =>
+      semaphore.release() // Release permit after processing
+      result
+    }.recover { case ex =>
+      semaphore.release() // Release permit if there's an error
+      throw ex
+    }
+  }
+
+  def retry[T](f: => Future[T], retries: Int = 3): Future[T] = {
+    f.recoverWith {
+      case _ if retries > 0 => after(2.seconds, system.scheduler)(retry(f, retries - 1))
+    }
+  }
+}
+
+
+
+
+
+-------------------------------------------------
+
+import org.apache.spark.sql.{Row, SparkSession}
+import org.apache.spark.sql.types._
+import io.circe.syntax._
+import io.circe.generic.semiauto._
+import io.circe.{Encoder, Decoder}
+import scala.concurrent.{Await, ExecutionContext, ExecutionContextExecutor, Future}
+import scala.concurrent.duration._
+import akka.actor.ActorSystem
+import akka.stream.{ActorMaterializer, Materializer}
+
+// Define your case classes and functions here
+
+case class InputRecord(field1: String, field2: String, field3: Int, apiResponse: Option[ApiResponse] = None)
+object InputRecord {
+  implicit val encoder: Encoder[InputRecord] = deriveEncoder[InputRecord]
+  implicit val decoder: Decoder[InputRecord] = deriveDecoder[InputRecord]
+}
+
+case class ApiRequestWrapper(data: InputRecord)
+object ApiRequestWrapper {
+  implicit val encoder: Encoder[ApiRequestWrapper] = deriveEncoder[ApiRequestWrapper]
+}
+
+case class ApiResponse(status: String, data: Option[String])
+object ApiResponse {
+  implicit val decoder: Decoder[ApiResponse] = deriveDecoder[ApiResponse]
+}
+
+def mapToApiRequest(inputRecord: InputRecord): String = {
+  val requestWrapper = ApiRequestWrapper(inputRecord)
+  requestWrapper.asJson.noSpaces
+}
+
+object SparkApiJob {
+  val spark: SparkSession = SparkSession.builder
+    .appName("Spark API Call Example")
+    .master("local[*]")
+    .getOrCreate()
+
+  import spark.implicits._
+
+  def main(args: Array[String]): Unit = {
+    val inputJsonPath = "path/to/your/input.json"
+
+    // Define the schema for the input JSON data
+    val inputSchema = new StructType()
+      .add("field1", StringType)
+      .add("field2", StringType)
+      .add("field3", IntegerType)
+
+    // Read the JSON data into a DataFrame
+    val inputDataFrame = spark.read
+      .schema(inputSchema)
+      .json(inputJsonPath)
+
+    // Convert the DataFrame to an RDD of InputRecord
+    val inputRdd: RDD[InputRecord] = inputDataFrame.as[InputRecord].rdd
+
+    // Define function to process each partition
+    def processPartition(partition: Iterator[InputRecord])
+                        (implicit system: ActorSystem, ec: ExecutionContext): Iterator[InputRecord] = {
+      val batchSize = 10
+      val partitionList = partition.toList
+      val batchedRequests = partitionList.grouped(batchSize).toList
+
+      val futures = batchedRequests.flatMap { batch =>
+        val batchFutures = batch.map { record =>
+          val jsonString = mapToApiRequest(record)
+          ApiCaller.retry(ApiCaller.callApi(jsonString)).map(response => record.copy(apiResponse = Some(response)))
+        }
+
+        Future.sequence(batchFutures).map(_.toIterator)
+      }
+
+      Await.result(Future.sequence(futures), Duration.Inf).flatten
+    }
+
+    // Apply mapPartitions to call the API and add the response
+    val results: RDD[InputRecord] = inputRdd.mapPartitions { partition =>
+      implicit val system: ActorSystem = ActorSystem()
+      implicit val ec: ExecutionContextExecutor = system.dispatcher
+      implicit val materializer: Materializer = ActorMaterializer()
+
+      try {
+        processPartition(partition).toList.iterator
+      } finally {
+        system.terminate()
+        Await.result(system.whenTerminated, Duration.Inf)
+      }
+    }
+
+    // Convert the results RDD to a DataFrame
+    val resultsDf = results.map { record =>
+      Row(record.field1, record.field2, record.field3, record.apiResponse.map(_.asJson.noSpaces).getOrElse(null))
+    }
+
+    val resultSchema = inputSchema.add("apiResponse", StringType)
+    val finalDf = spark.createDataFrame(resultsDf, resultSchema)
+
+    // Show the final DataFrame with responses
+    finalDf.show(false)
+
+    // Optionally, save the final DataFrame to a JSON file
+    finalDf.write.json("path/to/output.json")
+
+    spark.stop()
+  }
+}
