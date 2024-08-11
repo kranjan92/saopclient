@@ -1,0 +1,25 @@
+def processPartition(partition: Iterator[InputRecord])
+                    (implicit system: ActorSystem, ec: ExecutionContext): Iterator[InputRecord] = {
+  partition.map { record =>
+    val jsonString = mapToApiRequest(record)
+    val responseFuture = ApiCaller.retry(ApiCaller.callApi(jsonString))
+
+    try {
+      val response = Await.result(responseFuture, ApiCaller.overallTimeout) // Await with overall timeout
+
+      // Check the status code and handle errors
+      if (response.statusCode != 200) {
+        record.copy(apiResponse = Some(response), error = Some(s"Error: ${response.statusCode}"))
+      } else {
+        record.copy(apiResponse = Some(response))
+      }
+    } catch {
+      case ex: TimeoutException =>
+        // Handle timeout errors
+        record.copy(apiResponse = Some(ApiResponse(500, "error", Some(s"Failed: ${ex.getMessage}"))), error = Some(s"Failed: ${ex.getMessage}"))
+      case ex: Exception =>
+        // Handle other exceptions
+        record.copy(apiResponse = Some(ApiResponse(500, "error", Some(s"Failed: ${ex.getMessage}"))), error = Some(s"Failed: ${ex.getMessage}"))
+    }
+  }.toIterator
+}
