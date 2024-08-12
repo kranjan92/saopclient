@@ -1,0 +1,111 @@
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
+import org.mockito.Mockito._
+import org.mockito.ArgumentMatchers._
+import org.scalatestplus.mockito.MockitoSugar
+import scala.concurrent.Future
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.duration._
+import akka.actor.ActorSystem
+import akka.http.scaladsl.Http
+import akka.http.scaladsl.model._
+import akka.stream.ActorMaterializer
+
+class ApiCallerSpec extends AnyFlatSpec with Matchers with MockitoSugar {
+  
+  implicit val system: ActorSystem = ActorSystem()
+  implicit val materializer: ActorMaterializer = ActorMaterializer()
+
+  "ApiCaller" should "return a successful ApiResponse when the API call succeeds" in {
+    val mockHttp = mock[HttpExt]
+    val mockApiCaller = new ApiCaller {
+      override val http: HttpExt = mockHttp
+    }
+
+    val mockResponse = HttpResponse(status = StatusCodes.OK, entity = HttpEntity(ContentTypes.`application/json`, """{"statusCode": 200, "status": "success", "data": "some data"}"""))
+    
+    when(mockHttp.singleRequest(any[HttpRequest](), any(), any(), any())).thenReturn(Future.successful(mockResponse))
+    
+    val result = Await.result(mockApiCaller.callApi("""{"field1":"value1"}"""), 5.seconds)
+
+    result.statusCode shouldEqual 200
+    result.status shouldEqual "success"
+    result.data shouldEqual Some("some data")
+  }
+
+  it should "handle a timeout correctly" in {
+    val mockHttp = mock[HttpExt]
+    val mockApiCaller = new ApiCaller {
+      override val http: HttpExt = mockHttp
+    }
+
+    when(mockHttp.singleRequest(any[HttpRequest](), any(), any(), any())).thenReturn(Future.never)
+
+    val result = intercept[TimeoutException] {
+      Await.result(mockApiCaller.callApi("""{"field1":"value1"}"""), 10.seconds)
+    }
+
+    result.getMessage should include("API request timed out")
+  }
+
+  it should "retry failed API calls" in {
+    val mockHttp = mock[HttpExt]
+    val mockApiCaller = new ApiCaller {
+      override val http: HttpExt = mockHttp
+    }
+
+    val mockFailedResponse = Future.failed(new RuntimeException("API call failed"))
+    val mockSuccessResponse = HttpResponse(status = StatusCodes.OK, entity = HttpEntity(ContentTypes.`application/json`, """{"statusCode": 200, "status": "success", "data": "some data"}"""))
+
+    when(mockHttp.singleRequest(any[HttpRequest](), any(), any(), any()))
+      .thenReturn(mockFailedResponse)
+      .thenReturn(Future.successful(mockSuccessResponse))
+
+    val result = Await.result(mockApiCaller.retry(mockApiCaller.callApi("""{"field1":"value1"}"""), retries = 1), 10.seconds)
+
+    result.statusCode shouldEqual 200
+    result.status shouldEqual "success"
+    result.data shouldEqual Some("some data")
+  }
+}
+
+class ProcessPartitionSpec extends AnyFlatSpec with Matchers with MockitoSugar {
+
+  implicit val system: ActorSystem = ActorSystem()
+  implicit val materializer: ActorMaterializer = ActorMaterializer()
+
+  "processPartition" should "map over each record and process API calls correctly" in {
+    val partition = Seq(
+      InputRecord("value1", "value2", 123),
+      InputRecord("value3", "value4", 456)
+    ).iterator
+
+    val mockApiCaller = mock[ApiCaller]
+
+    when(mockApiCaller.callApi(anyString()))
+      .thenReturn(Future.successful(ApiResponse(200, "success", Some("some data"))))
+
+    val results = SparkApiJob.processPartition(partition)(system, system.dispatcher).toSeq
+
+    results.size shouldEqual 2
+    results.head.apiResponse shouldEqual Some(ApiResponse(200, "success", Some("some data")))
+    results.head.error shouldEqual None
+  }
+
+  it should "handle exceptions and record errors" in {
+    val partition = Seq(
+      InputRecord("value1", "value2", 123)
+    ).iterator
+
+    val mockApiCaller = mock[ApiCaller]
+
+    when(mockApiCaller.callApi(anyString()))
+      .thenReturn(Future.failed(new RuntimeException("API call failed")))
+
+    val results = SparkApiJob.processPartition(partition)(system, system.dispatcher).toSeq
+
+    results.size shouldEqual 1
+    results.head.apiResponse shouldEqual None
+    results.head.error shouldEqual Some("Failed: API call failed")
+  }
+}
